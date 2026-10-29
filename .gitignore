@@ -6,3 +6,8 @@
 *.sublime-workspace
 *.sublime-project
 games.d/
+
+# Nix
+/result
+/result-*
+.direnv/

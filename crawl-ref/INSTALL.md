@@ -6,6 +6,7 @@
 * [Compiling](#compiling)
   * [Ubuntu / Debian](#ubuntu--debian)
   * [Fedora](#fedora)
+  * [NixOS](#nixos)
   * [Other Linux / Unix](#other-linux--unix)
   * [AppImage](#appimage)
   * [macOS](#macOS)
@@ -103,6 +104,20 @@ dejavu-sans-fonts dejavu-sans-mono-fonts advancecomp pngcrush
 ```
 
 Then follow [the above compilation steps](#compiling).
+
+### NixOS
+
+This tree has a Nix flake at the repository root. From there:
+
+```sh
+nix build          # tiles (result/bin/crawl-tiles)
+nix build .#crawl  # console (result/bin/crawl)
+nix run            # play tiles
+nix develop        # toolchain, then:
+cd crawl-ref/source && make -j$(nproc) TILES=y
+```
+
+Saves go in `~/.crawl`, same as a typical Unix install.
 
 ## Other Linux / Unix
 

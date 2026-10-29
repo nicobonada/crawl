@@ -1,0 +1,132 @@
+{
+  stdenv,
+  lib,
+  which,
+  sqlite,
+  lua5_4,
+  perl,
+  python3,
+  zlib,
+  pkg-config,
+  ncurses,
+  dejavu_fonts,
+  libpng,
+  SDL2,
+  SDL2_image,
+  SDL2_mixer,
+  libGLU,
+  libGL,
+  freetype,
+  pngcrush,
+  advancecomp,
+  buildPackages,
+  src,
+  version,
+  tileMode ? false,
+  enableSound ? tileMode,
+}:
+
+stdenv.mkDerivation (finalAttrs: {
+  pname = "crawl${lib.optionalString tileMode "-tiles"}";
+  inherit src version;
+
+  postPatch = lib.optionalString tileMode ''
+    substituteInPlace crawl-ref/source/util/find_font \
+      --replace-fail \
+      '/usr/share/fonts /usr/local/share/fonts /usr/*/lib/X11/fonts' \
+      '${dejavu_fonts}/share/fonts'
+    substituteInPlace crawl-ref/source/windowmanager-sdl.cc \
+      --replace-fail 'SDL_image.h' 'SDL2/SDL_image.h'
+  '';
+
+  nativeBuildInputs = [
+    pkg-config
+    which
+    perl
+    python3
+    python3.pkgs.pyyaml
+  ]
+  ++ lib.optionals tileMode [
+    pngcrush
+    advancecomp
+  ];
+
+  # Still unstable with luajit.
+  buildInputs = [
+    lua5_4
+    zlib
+    sqlite
+    ncurses
+  ]
+  ++ lib.optionals tileMode [
+    libpng
+    SDL2
+    SDL2_image
+    freetype
+    libGLU
+    libGL
+  ]
+  ++ lib.optional enableSound SDL2_mixer;
+
+  preBuild = ''
+    cd crawl-ref/source
+    echo "${finalAttrs.version}" > util/release_ver
+    patchShebangs util
+    rm -rf contrib
+    mkdir -p $out/xdg-data
+  ''
+  + lib.optionalString tileMode "mv xdg-data/*_tiles.* $out/xdg-data"
+  + lib.optionalString (!tileMode) "mv xdg-data/*_console.* $out/xdg-data";
+
+  makeFlags = [
+    "prefix=${placeholder "out"}"
+    "FORCE_CC=${stdenv.cc.targetPrefix}cc"
+    "FORCE_CXX=${stdenv.cc.targetPrefix}c++"
+    "HOSTCXX=${buildPackages.stdenv.cc.targetPrefix}c++"
+    "FORCE_PKGCONFIG=y"
+    "SAVEDIR=~/.crawl"
+    "DATADIR=${placeholder "out"}"
+  ]
+  ++ lib.optional tileMode "TILES=y"
+  ++ lib.optional enableSound "SOUND=y";
+
+  postInstall =
+    lib.optionalString tileMode ''
+      mv $out/bin/crawl $out/bin/crawl-tiles
+      echo "Exec=crawl-tiles" >> $out/xdg-data/org.develz.Crawl_tiles.desktop
+      echo "Icon=crawl" >> $out/xdg-data/org.develz.Crawl_tiles.desktop
+      install -Dm444 $out/xdg-data/org.develz.Crawl_tiles.desktop \
+        -t $out/share/applications
+      install -Dm444 $out/xdg-data/org.develz.Crawl_tiles.appdata.xml \
+        -t $out/share/metainfo
+    ''
+    + lib.optionalString (!tileMode) ''
+      echo "Exec=crawl" >> $out/xdg-data/org.develz.Crawl_console.desktop
+      echo "Icon=crawl" >> $out/xdg-data/org.develz.Crawl_console.desktop
+      install -Dm444 $out/xdg-data/org.develz.Crawl_console.desktop \
+        -t $out/share/applications
+      install -Dm444 $out/xdg-data/org.develz.Crawl_console.appdata.xml \
+        -t $out/share/metainfo
+    ''
+    + ''
+      install -Dm444 dat/tiles/stone_soup_icon-512x512.png \
+        $out/share/icons/hicolor/512x512/apps/crawl.png
+    '';
+
+  enableParallelBuilding = true;
+
+  meta = {
+    description = "Open-source, single-player, role-playing roguelike";
+    homepage = "https://crawl.develz.org/";
+    license = with lib.licenses; [
+      gpl2Plus
+      bsd2
+      bsd3
+      mit
+      lib.licenses.zlib
+      cc0
+    ];
+    platforms = lib.platforms.linux;
+    mainProgram = if tileMode then "crawl-tiles" else "crawl";
+  };
+})
