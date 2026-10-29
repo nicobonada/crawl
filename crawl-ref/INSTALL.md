@@ -119,6 +119,16 @@ cd crawl-ref/source && make -j$(nproc) TILES=y
 
 Saves go in `~/.crawl`, same as a typical Unix install.
 
+On a personal fork, keep the flake on the `nix-flake` bookmark and leave
+`master` as a fast-forward of crawl/crawl:
+
+```sh
+./scripts/catch-up-upstream         # fetch trunk, rebase nix-flake
+./scripts/catch-up-upstream --push  # also update origin/nix-flake
+```
+
+Drop that script if the flake is merged upstream.
+
 ## Other Linux / Unix
 
 You need the following dependencies:

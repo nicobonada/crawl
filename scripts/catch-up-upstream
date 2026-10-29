@@ -1,0 +1,120 @@
+#!/usr/bin/env fish
+# Rebase the personal-fork flake onto crawl/crawl trunk.
+#
+# Keeps local `master` as a fast-forward of `master@upstream` and leaves
+# the flake on `nix-flake`. Does not move fork `master`. Drop this script
+# when the flake is in crawl/crawl.
+#
+# Usage:
+#   ./scripts/catch-up-upstream
+#   ./scripts/catch-up-upstream --push
+
+set -l root (path resolve (status dirname)/..)
+cd $root
+
+set -l trunk master
+set -l topic nix-flake
+set -l up_remote upstream
+set -l fork_remote origin
+
+function usage
+    echo "Rebase nix-flake onto upstream/master (crawl/crawl)."
+    echo
+    echo "  ./scripts/catch-up-upstream        local fetch + ff + rebase"
+    echo "  ./scripts/catch-up-upstream --push also push nix-flake to origin"
+end
+
+function die
+    echo "catch-up-upstream: $argv" >&2
+    exit 1
+end
+
+argparse h/help push -- $argv
+or exit 2
+
+if set -q _flag_help
+    usage
+    exit 0
+end
+
+test -d $root/.jj
+or die "no .jj under $root"
+
+set -l remotes (jj git remote list)
+string match -q "$up_remote *" -- $remotes
+or die "missing remote `$up_remote` (crawl/crawl)"
+string match -q "$fork_remote *" -- $remotes
+or die "missing remote `$fork_remote` (nicobonada/crawl)"
+
+jj bookmark list $trunk >/dev/null 2>&1
+or die "no local bookmark `$trunk`"
+jj bookmark list $topic >/dev/null 2>&1
+or die "no local bookmark `$topic`"
+
+set -l st (jj status 2>/dev/null | string collect)
+string match -qr 'Working copy changes:' -- $st
+and die "working copy dirty; commit or restore first"
+
+if not set -q GIT_SSH_COMMAND
+    # Match agent-apps ssh wrapper: user config only.
+    set -x GIT_SSH_COMMAND 'ssh -F ~/.ssh/config'
+end
+
+# Only trunk (+ version tags). A bare fetch of crawl/crawl is hundreds
+# of stale topic branches. --quiet hides the tag import list.
+echo "catch-up-upstream: fetching $up_remote $trunk"
+jj --quiet git fetch --remote $up_remote -b $trunk -t '0.*'
+or die "fetch of $up_remote failed"
+
+set -l old_master (jj log -r $trunk --no-graph -n 1 -T 'commit_id')
+test -n "$old_master"
+or die "could not read `$trunk`"
+
+set -l up_rev $trunk@$up_remote
+set -l ahead (jj log -r "$up_rev ~ $trunk" --no-graph -n 1 -T 'commit_id')
+if test -n "$ahead"
+    set -l ff (jj log -r "$up_rev & $trunk::" --no-graph -n 1 -T 'commit_id')
+    test -n "$ff"
+    or die "$up_rev diverged from local `$trunk`; not fast-forwarding"
+
+    jj bookmark set $trunk -r $up_rev
+    or die "failed to move `$trunk` to $up_rev"
+
+    echo "catch-up-upstream: fast-forwarded $trunk"
+    jj log -r "$old_master..$trunk" --no-graph -n 10 \
+        -T 'commit_id.short() ++ " " ++ description.first_line() ++ "\n"'
+else
+    echo "catch-up-upstream: `$trunk` already at $up_remote"
+end
+
+jj rebase -b $topic -d $trunk
+or die "rebase of `$topic` onto `$trunk` failed"
+
+set -l conflicts (jj log -r 'conflicts()' --no-graph -n 1 -T 'commit_id')
+if test -n "$conflicts"
+    die "rebase left conflicts; edit files, then `jj status` (do not `jj resolve`)"
+end
+
+# Sit on an empty working copy at the topic tip.
+jj new $topic
+or die "failed to move working copy onto `$topic`"
+
+jj bookmark set $topic -r @-
+or die "failed to point `$topic` at the rebased tip"
+
+echo "catch-up-upstream: `$topic` is on `$trunk`"
+jj log -r "$topic" --no-graph -n 1 \
+    -T 'commit_id.short() ++ " " ++ description.first_line() ++ "\n"'
+
+set -l tag (git describe --abbrev=0 $trunk 2>/dev/null)
+set -l base (rg -o 'base = "[^"]+"' flake.nix | string split -f2 '"')
+if test -n "$tag" -a -n "$base" -a "$tag" != "$base"
+    echo "catch-up-upstream: flake version base is `$base`, latest tag is `$tag`" >&2
+    echo "  bump `base` in flake.nix if gen_ver.pl should follow the new tag" >&2
+end
+
+if set -q _flag_push
+    jj git push --bookmark $topic --remote $fork_remote
+    or die "push of `$topic` to $fork_remote failed"
+    echo "catch-up-upstream: pushed $topic to $fork_remote"
+end
